@@ -10,6 +10,7 @@ import (
 type TTLShard struct {
 	sync.RWMutex
 	data map[uint64][]byte
+	size int
 }
 
 func NewTTLShard() *TTLShard {
@@ -21,8 +22,9 @@ func NewTTLShard() *TTLShard {
 func (s *TTLShard) clean() {
 	s.Lock()
 	for k, data := range s.data {
-		_, expire := s.unwrapData(data)
+		d, expire := s.unwrapData(data)
 		if s.isExpired(expire) {
+			s.size -= len(d)
 			delete(s.data, k)
 		}
 	}
@@ -52,16 +54,23 @@ func (s *TTLShard) Get(key uint64) ([]byte, error) {
 
 func (s *TTLShard) Set(key uint64, data []byte, ttl uint64) error {
 	s.Lock()
-	d := s.wrapData(data, ttl)
+	d, exist := s.data[key]
+	if exist {
+		s.size -= len(d)
+	}
+	d = s.wrapData(data, ttl)
 	s.data[key] = d
+	s.size += len(d)
 	s.Unlock()
 	return nil
 }
 
 func (s *TTLShard) Del(key uint64) error {
 	s.Lock()
-	_, ok := s.data[key]
+	data, ok := s.data[key]
 	if ok {
+		d, _ := s.unwrapData(data)
+		s.size -= len(d)
 		delete(s.data, key)
 	}
 	s.Unlock()
@@ -94,7 +103,7 @@ func (s *TTLShard) isExpired(ts uint64) bool {
 
 func (s *TTLShard) GetSize() int {
 	s.RLock()
-	size := len(s.data)
+	size := s.size
 	s.RUnlock()
 	return size
 }
